@@ -143,6 +143,10 @@ clone. At the end, stop your own lease and check `prlctl list -a`; the disposabl
 VM and its per-lease key must be gone. A stop-marker warning does not establish
 cleanup. Verify the VM and key deletion. The saved base VMs must remain.
 
+For repeated tests, warm one lease per agent and reuse its ID. Fresh one-shot
+runs repeat cloning and guest bootstrap. Use them when checking the base itself
+or when a test needs a clean machine. Keep using Crabbox's lifecycle commands.
+
 ## What the existing app evidence proves
 
 | Target | Verified result | Boundary |
