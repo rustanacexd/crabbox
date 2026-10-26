@@ -1,27 +1,23 @@
-# RustanAceXD's Crabbox integration fork
+# Crabbox with temporary Parallels fixes
 
-Use this fork for the Go2 test lab until the two Parallels fixes land upstream.
-The maintained branch is `codex/go2-lab`. It contains upstream Crabbox plus the
-reviewed fixes below and this operator guide. It adds no provider, wrapper,
-coordinator, or project-specific runner.
+This fork combines two upstream fixes on `codex/parallels-fixes`:
 
-| Fix | Upstream review | Included source commits |
-| --- | --- | --- |
-| Retry repeatable Windows script staging when Parallels Tools loses a command result. | [Windows PR](https://github.com/openclaw/crabbox/pull/2957), with native Windows proof. | `630c00ed`, `58afb765` |
-| Honor an explicit macOS guest account while preserving the existing default for an omitted account. | [macOS PR](https://github.com/openclaw/crabbox/pull/2958), with native before/after proof. | `6479f2e7`, `446b8d8d` |
+- [Windows script staging recovery](https://github.com/openclaw/crabbox/pull/2957).
+- [Explicit macOS guest account selection](https://github.com/openclaw/crabbox/pull/2958).
 
-Both PRs have accepted behavior proof and no remaining review findings as of
-2026-10-26. Upstream maintainer approval and merge remain separate. Installing
-the stock release does not include these unmerged fixes.
+Read the official [Crabbox agent skill](skills/crabbox/SKILL.md) before using
+Crabbox. This fork preserves that skill unchanged. Use the standard CLI,
+providers, configuration, jobs, and artifact tooling. Project-specific tests
+and setup belong in their project repository. Host-specific template identities
+belong in user configuration.
 
-## Install the fork CLI
+## Build and install
 
-Build from the maintained branch with the Go toolchain declared in `go.mod`.
-The module path stays `github.com/openclaw/crabbox`; the clone URL selects this
-fork. Do not use `go install github.com/openclaw/crabbox@latest` for this setup.
+Use the Go toolchain declared in `go.mod`. Build the official CLI from this
+fork to include both fixes. The module path remains `github.com/openclaw/crabbox`.
 
 ```sh
-git clone --branch codex/go2-lab --single-branch https://github.com/rustanacexd/crabbox.git
+git clone --branch codex/parallels-fixes --single-branch https://github.com/rustanacexd/crabbox.git
 cd crabbox
 mkdir -p "$HOME/.local/bin"
 go build -trimpath -o "$HOME/.local/bin/crabbox" ./cmd/crabbox
@@ -32,199 +28,50 @@ crabbox --version
 go version -m "$HOME/.local/bin/crabbox"
 ```
 
-A source build can report `dev`. Check `vcs.revision` and `vcs.modified=false`
-in `go version -m` against `git rev-parse HEAD`. The fork binary must resolve
-before `/opt/homebrew/bin/crabbox`. Keep the Homebrew installation as a rollback;
-remove the fork binary or select the Homebrew path explicitly to use it.
+A source build can report `dev`. Compare `vcs.revision` with `git rev-parse HEAD`
+and check `vcs.modified=false`. Keep an existing release installation available
+for rollback, and verify which binary your shell selects.
 
-Use the official [Crabbox agent skill](skills/crabbox/SKILL.md). Its contents
-are unchanged by this fork. Install that skill through your agent's normal
-skill installer and read it before using the CLI. For Go2, also read the
-repository's verification skill. The
-[capture-retirement change](https://github.com/go2impact/go2-desktop/pull/608)
-records the current time-tracking, shift, and stability scope.
+## Inspect and reuse existing templates
 
-## Reuse the saved Parallels bases
+Before creating a VM, run `crabbox config path`, `crabbox config show`, and
+`crabbox doctor`. Inspect configured template aliases and the source VM's state.
+Use an existing suitable template before preparing another. Follow the
+[Parallels provider rules](docs/providers/parallels.md) for guest accounts,
+Tools readiness, clone modes, and snapshots.
 
-These are local VMs on Rustan's Apple silicon Mac, recorded on 2026-10-26.
-The repository does not distribute VM disk images. UUIDs identify these local
-VMs; they are not credentials. Another Mac needs its own prepared bases.
-All four reusable images have 6 GiB RAM, four CPUs, a `crabbox` guest account,
-completed initial setup, automatic login, and Parallels Tools 27.0.3.
+Keep clone sources stopped. A linked clone needs its selected power-off
+snapshot. A full clone uses the current stopped source and cannot select a
+snapshot. Set the actual guest account and a writable guest work root. Do not
+assume the host account exists in the guest. Preserve source VMs and snapshots
+when cleaning up disposable leases.
 
-| Local template alias | VM name and UUID | Saved snapshot | State and use |
-| --- | --- | --- | --- |
-| `macos-dev` | `Crabbox macOS Base`<br>`ddfa915d-cac6-4b8b-ae0e-14612ba9e5e0` | `696d3251-0188-4923-8743-9645bb525455`<br>`crabbox-macos-developer-base-20261026` | Stopped. Generic base without Go2. Full clones use its current stopped state. |
-| `windows-dev` | `Crabbox Windows Base`<br>`2d2d9cc2-0b57-4ad0-bc1d-1db0df186fec` | `b0cefad0-ea9d-4c91-8506-31e0fb67927f`<br>`crabbox-windows-developer-base-20261026` | Stopped. Generic base without Go2. Use linked clones of this power-off snapshot. |
-| `go2-macos-lab` | `Go2 macOS Lab`<br>`6030d71e-a4f1-46d2-9d1e-c23de376b208` | `d5d8e175-bdee-4e54-b8a5-53dc7a1d9807`<br>`go2-macos-fixture-a03104e` | Stopped. Go2 source package at `a03104e` installed in `/Applications/Go2.app`. Full clones use its current stopped state. |
-| `go2-windows-lab` | `crabbox-cbx-140033b317f6-go2-alpha-native-full`<br>`eeb1bdb4-dc44-4f0a-ae60-1456b5152392` | `f4c59547-51dc-42f8-af78-7d2da603caed`<br>Crabbox checkpoint `chk_540cfee63bdf3773` | Saved and suspended. Use a linked clone of the saved power-off snapshot. The earlier private alias was `go2-signed-win11-6gb`. |
+Run from the project checkout you intend to sync. Review its configuration and
+`crabbox sync-plan` before sending files. Exclude credentials, private environment
+files, signing keys, and unrelated data. Give concurrent actors separate leases,
+checkouts, test fixtures, and artifact directories.
 
-The generic macOS base has macOS 26.6.2 ARM64, Command Line Tools, Apple Git
-2.50.1, Node 22.22.0, and pnpm 11.21.0. It has no Go2 app, profile, or preferences.
-The generic Windows base has Windows 11 Pro ARM64 build 26300, Git 2.55.0,
-Node 22.22.0, and pnpm 11.21.0. Its existing x64 tools run through Windows
-emulation. It is not native x64 Windows. Go2 installations, profiles, workspaces,
-and scheduled tasks are absent. Defender is enabled with no exclusions.
+For repeated checks, warm a lease once and reuse its ID with `crabbox run --id`.
+Use `--keep` when subsequent commands need that lease. Fresh one-shot runs are
+useful when checking provisioning or when a test requires a clean machine.
+Stop only your owned disposable lease with `crabbox stop`. Verify the VM and its
+per-lease keys were removed. A cleanup warning alone does not prove removal.
 
-The original `macOS` VM, `018dd91f-575a-4b2a-a4d2-071476ef9fb6`, remains stopped
-with the signed Go2 0.7.13-alpha app and recovery snapshot
-`06dbb8f2-1c3c-4280-a429-8272e64a9cac`. The original `Windows 11` VM,
-`6d2e1e48-f74d-46d9-b7df-95c171044006`, also remains stopped. These are recovery
-sources, not the generic bases. Do not delete them as abandoned test clones.
+Retrieve required artifacts before stopping the lease. Record the source
+revision, command, exit status, and cleanup result with each test's evidence.
+Use the official skill's sync and artifact commands for the details.
 
-### Configure the local aliases
+## Maintain the temporary fork
 
-Inspect `crabbox config path` and `crabbox config show` first. On macOS, merge
-these entries into `~/Library/Application Support/crabbox/config.yaml` without
-replacing unrelated settings. Keep passwords, tokens, and SSH private keys out
-of this file and the repository.
+Keep `main` as the upstream mirror and `codex/parallels-fixes` as the integration
+branch. Leave the upstream PR branches separate. Merge upstream updates into
+the integration branch, resolve merged fixes to their upstream implementations,
+and rerun the affected provider tests and fresh-clone checks. Avoid force-pushing
+the shared branch.
 
-```yaml
-provider: parallels
-parallels:
-  templates:
-    macos-dev:
-      target: macos
-      sourceId: ddfa915d-cac6-4b8b-ae0e-14612ba9e5e0
-      cloneMode: full
-      user: crabbox
-      workRoot: /Users/crabbox/crabbox
-    windows-dev:
-      target: windows
-      windowsMode: normal
-      sourceId: 2d2d9cc2-0b57-4ad0-bc1d-1db0df186fec
-      sourceSnapshotId: b0cefad0-ea9d-4c91-8506-31e0fb67927f
-      cloneMode: linked
-      user: crabbox
-      workRoot: C:\Crabbox\workspaces
-    go2-macos-lab:
-      target: macos
-      sourceId: 6030d71e-a4f1-46d2-9d1e-c23de376b208
-      cloneMode: full
-      user: crabbox
-      workRoot: /Users/crabbox/crabbox
-    go2-windows-lab:
-      target: windows
-      windowsMode: normal
-      sourceId: eeb1bdb4-dc44-4f0a-ae60-1456b5152392
-      sourceSnapshotId: f4c59547-51dc-42f8-af78-7d2da603caed
-      cloneMode: linked
-      user: crabbox
-      workRoot: C:\Go2Lab\workspaces
-```
-
-Keep source VMs stopped for cloning. The retained Go2 Windows session is
-suspended; stop it cleanly before cloning if Parallels reports that the source
-is busy. Preserve its saved snapshot. Never run `crabbox stop` against a saved
-base or its retained source lease.
-
-### Run and remove your own disposable clone
-
-Run from the project checkout you intend to sync. Review its Crabbox config and
-`crabbox sync-plan` first. A generic base supplies tools, not project dependencies.
-Give each concurrent agent its own lease, checkout, backend fixture, and evidence
-directory. These commands use only the standard provider and lease lifecycle.
-
-```sh
-crabbox doctor --provider parallels --parallels-template macos-dev
-crabbox warmup --provider parallels --parallels-template macos-dev --slug my-macos-check
-crabbox run --provider parallels --id my-macos-check --no-sync -- node --version
-crabbox stop --provider parallels my-macos-check
-
-crabbox doctor --provider parallels --parallels-template windows-dev
-crabbox warmup --provider parallels --parallels-template windows-dev --slug my-windows-check
-crabbox run --provider parallels --id my-windows-check --no-sync -- node --version
-crabbox stop --provider parallels my-windows-check
-```
-
-`warmup` does not sync source. Omit `--no-sync` on `run` when the reviewed project
-checkout should be copied. Use `--keep` only when another command needs the same
-clone. At the end, stop your own lease and check `prlctl list -a`; the disposable
-VM and its per-lease key must be gone. A stop-marker warning does not establish
-cleanup. Verify the VM and key deletion. The saved base VMs must remain.
-
-For repeated tests, warm one lease per agent and reuse its ID. Fresh one-shot
-runs repeat cloning and guest bootstrap. Use them when checking the base itself
-or when a test needs a clean machine. Keep using Crabbox's lifecycle commands.
-
-## What the existing app evidence proves
-
-| Target | Verified result | Boundary |
-| --- | --- | --- |
-| Native GCP Linux | All 37 retained time-tracking, shift, and stability E2E cases passed. | Full source suite against its own Cosmos instance. The owned VM and boot disk were deleted after evidence retrieval. |
-| Parallels Windows ARM64 | The packaged app started and passed three persisted shift spans, offline retry, drained queue, renderer, and cleanup checks. | Existing localhost HTTP-fixture smoke. Not the full 37-case Cosmos suite or native x64 Windows. |
-| Parallels macOS ARM64 | The installed source package at `a03104e` passed the same persisted shift, offline retry, queue, renderer, and cleanup checks. | Existing localhost HTTP-fixture smoke. Not the full 37-case Cosmos suite, release signing, or updater qualification. |
-| Generic Windows and macOS bases | A fresh native clone passed tool checks and reached its desktop. | Proves reusable developer setup, not an application test result. |
-
-Run the current Go2 verification skill for new changes. A saved app and an old
-PASS are not fresh qualification. Capture E2E tests and capture verification
-material were deliberately retired during the rewrite. Do not restore those
-checks as a prerequisite for using these bases. App-specific macOS privacy
-permissions are not a blanket promise made by the generic base.
-
-The reviewed setup and bounded receipts are in
-[Desktop setup PR](https://github.com/go2impact/go2-desktop/pull/604),
-[Desktop scope PR](https://github.com/go2impact/go2-desktop/pull/608), and
-[Cosmos verification PR](https://github.com/go2impact/cosmos/pull/3291).
-The full local evidence stays under
-`~/.local/state/go2-crabbox-performance-20261025/` in `linux-perf-resumed`,
-`windows-retirement-verification`, `macos-go2-e2e`, `windows-neutral-base`, and
-`macos-neutral-base`. Do not publish those directories wholesale.
-
-## Lessons that prevent a repeat of setup failures
-
-- Use the native `parallels` and `gcp` providers. A successful static SSH command
-  does not prove native GCP provisioning. The Cosmos repo owns its project and
-  infrastructure configuration; this fork does not add cloud resources.
-- Keep both fixes in one installed binary. A Windows-only or macOS-only build
-  leaves another agent exposed to the other provisioning failure.
-- For macOS, use a full clone of the current stopped source and leave both
-  snapshot selectors unset. Full clones cannot select a snapshot. To override
-  inherited selectors, pass `--parallels-source-snapshot=` and
-  `--parallels-source-snapshot-id=`. See the
-  [native Parallels provider rules](docs/providers/parallels.md).
-- Set `user: crabbox` explicitly. Do not assume the Mac host user exists inside
-  the guest. Confirm the actual guest account and writable work root.
-- Leave `--arch` unset for these Parallels aliases. The guest determines the
-  architecture. Verify with `uname -m` or the Windows system information.
-- `--desktop` requests additional remote desktop preparation. It is not needed
-  for SSH execution or viewing the VM in Parallels. The optional macOS remote
-  Screen Sharing preparation was not qualified. Do not block ordinary runs on it.
-- A black capture does not prove a failed guest boot. Check the visible Parallels
-  window, full-screen state, Tools readiness, guest IP, and command execution
-  before replacing the VM or repeating setup.
-- Windows generic tools must not point into a deleted Go2 directory. The generic
-  base has real Git at `C:\Program Files\Git` and tools under `C:\DeveloperTools`.
-  Do not recreate the old dangling Git junction or self-including Git config.
-- Keep Defender enabled. The Go2 dependency uses the already-released signed
-  helper from the [Go2-owned assets release](https://github.com/go2impact/cowork-ai-node-global-key-listener/releases/tag/native-assets-0.7.13-alpha).
-  Do not add Defender exclusions to make a dependency install pass.
-- Reuse verified dependency stores for unchanged runs. A deliberate cold-install
-  test needs a new store and `--side-effects-cache=false`; routine verification
-  does not. Materialize Electron before measuring launcher startup.
-- Run the full Linux suite on one Linux host with its own Cosmos checkout and
-  serialize heavy builds, resets, and wall-clock tests there. The macOS guest
-  has no qualified nested Docker setup. Do not add a cross-host Docker workaround.
-- Exclude separate credentials, private environment files, signing keys, database
-  dumps, and raw Git history from sync. Inspect the selected files. Intentionally
-  committed Cosmos credentials are authorized only on the private owned runner.
-- Preserve exact source revisions, run IDs, required artifacts, test exit status,
-  and cleanup evidence. A green command, package build, or desktop screenshot
-  alone is not proof that the app's E2E assertions passed.
-
-## Update this fork without losing the fixes
-
-Keep `main` as the upstream mirror and `codex/go2-lab` as the forward-only
-integration branch. Keep the two upstream PR branches separate. To take an
-upstream update, fetch upstream and merge it into `codex/go2-lab`; resolve any
-merged fix to the upstream implementation, then repeat the provider and CLI
-tests and both fresh-clone checks. Do not force-push this shared branch.
-
-When both PRs are merged and an installed upstream build passes the same
-macOS and Windows clone checks, switch the installed CLI back to upstream.
-Keep this README's VM inventory and the project verification receipts until
-they have a maintained home. Do not remove a local base just because its
-provider fix has merged.
+After both fixes merge, validate an upstream build with the same clone checks
+and return to the upstream CLI. Retiring this fork does not require deleting
+local templates or project evidence.
 
 The remainder of this README is the unchanged upstream guide.
 
