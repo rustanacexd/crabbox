@@ -20,7 +20,11 @@ fork to include both fixes. The module path remains `github.com/openclaw/crabbox
 git clone --branch codex/parallels-fixes --single-branch https://github.com/rustanacexd/crabbox.git
 cd crabbox
 mkdir -p "$HOME/.local/bin"
-go build -trimpath -o "$HOME/.local/bin/crabbox" ./cmd/crabbox
+crabbox_revision="$(git rev-parse --short=12 HEAD)"
+crabbox_version="0.79.3-parallels.$crabbox_revision"
+CGO_ENABLED=1 go build -trimpath \
+  -ldflags="-X github.com/openclaw/crabbox/internal/cli.version=$crabbox_version" \
+  -o "$HOME/.local/bin/crabbox" ./cmd/crabbox
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
 command -v crabbox
@@ -28,9 +32,14 @@ crabbox --version
 go version -m "$HOME/.local/bin/crabbox"
 ```
 
-A source build can report `dev`. Compare `vcs.revision` with `git rev-parse HEAD`
-and check `vcs.modified=false`. Keep an existing release installation available
-for rollback, and verify which binary your shell selects.
+This recipe labels the local fork build with its source revision; it is not an
+upstream release. Record `go version`, `go env GOOS GOARCH CGO_ENABLED`, the exact
+build command and the binary's SHA-256. Compare `vcs.revision` with
+`git rev-parse HEAD` and check `vcs.modified=false`. Repeat the same build with
+the same toolchain and environment to check byte-for-byte reproducibility.
+Keep an existing release installation available for rollback, and verify which
+binary your shell selects. This is the standard CLI-only source build; it does
+not manufacture a release runtime pack.
 
 ## Inspect and reuse existing templates
 
@@ -45,6 +54,14 @@ snapshot. A full clone uses the current stopped source and cannot select a
 snapshot. Set the actual guest account and a writable guest work root. Do not
 assume the host account exists in the guest. Preserve source VMs and snapshots
 when cleaning up disposable leases.
+
+Set the guest account in `parallels.user` or the selected template's `user`.
+Generic `ssh.user` does not currently override the Parallels default reliably.
+
+A reusable source must be an operator-managed VM, separate from disposable
+Crabbox leases. `keep=true` suppresses automatic release after a run; it does
+not protect an expired lease from `crabbox machine cleanup`. Check the cleanup
+dry run before treating any retained machine as a permanent base.
 
 Run from the project checkout you intend to sync. Review its configuration and
 `crabbox sync-plan` before sending files. Exclude credentials, private environment
