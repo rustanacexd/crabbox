@@ -1,53 +1,61 @@
-# Crabbox with temporary Parallels fixes
+# Crabbox: upstream mirror and temporary installation guide
 
-This fork combines two upstream fixes on `codex/parallels-fixes`:
+This fork follows [upstream main](https://github.com/openclaw/crabbox/tree/main).
+Its only current tree difference is this project-neutral README introduction.
+The Windows staging recovery fix and macOS guest-account fix are now upstream:
 
-- [Windows script staging recovery](https://github.com/openclaw/crabbox/pull/2957).
-- [Explicit macOS guest account selection](https://github.com/openclaw/crabbox/pull/2958).
+- [Windows staging recovery, merged](https://github.com/openclaw/crabbox/pull/2957).
+- [macOS guest-account selection, merged](https://github.com/openclaw/crabbox/pull/2958).
+
+As checked on 2026-10-26, the latest published release is
+[v0.79.3](https://github.com/openclaw/crabbox/releases/tag/v0.79.3). It predates
+both fixes. A merge into upstream main does not update installed release binaries.
+Keep a verified fork build until a published release contains both fixes and
+passes the native clone checks below. Do not switch to the older released CLI
+just because both pull requests merged.
 
 Read the official [Crabbox agent skill](skills/crabbox/SKILL.md) before using
-Crabbox. This fork preserves that skill unchanged. Use the standard CLI,
-providers, configuration, jobs, and artifact tooling. Project-specific tests
-and setup belong in their project repository. Host-specific template identities
-belong in user configuration.
+Crabbox. This fork preserves it unchanged. Use the standard CLI, providers,
+configuration, jobs, and artifact tooling. Project-specific tests and setup
+belong in their project repository. Host-specific template identities belong
+in private user configuration.
 
-## Build and install
+## Build and qualify a source version
 
-Use the Go toolchain declared in `go.mod`. Build the official CLI from this
-fork to include both fixes. The module path remains `github.com/openclaw/crabbox`.
+`codex/parallels-fixes` includes current upstream changes, including unreleased
+ones. An updated branch is not proof that a previously installed binary changed
+or that a new build has passed native provider checks. Pin the source revision
+and build a candidate separately from the working CLI:
 
 ```sh
 git clone --branch codex/parallels-fixes --single-branch https://github.com/rustanacexd/crabbox.git
 cd crabbox
-mkdir -p "$HOME/.local/bin"
+mkdir -p bin
 crabbox_revision="$(git rev-parse --short=12 HEAD)"
-crabbox_version="0.79.3-parallels.$crabbox_revision"
+crabbox_version="0.79.3-fork.$crabbox_revision"
 CGO_ENABLED=1 go build -trimpath \
   -ldflags="-X github.com/openclaw/crabbox/internal/cli.version=$crabbox_version" \
-  -o "$HOME/.local/bin/crabbox" ./cmd/crabbox
-export PATH="$HOME/.local/bin:$PATH"
-hash -r
-command -v crabbox
-crabbox --version
-go version -m "$HOME/.local/bin/crabbox"
+  -o bin/crabbox-candidate ./cmd/crabbox
+bin/crabbox-candidate --version
+go version -m bin/crabbox-candidate
 ```
 
-This recipe labels the local fork build with its source revision; it is not an
-upstream release. Record `go version`, `go env GOOS GOARCH CGO_ENABLED`, the exact
-build command and the binary's SHA-256. Compare `vcs.revision` with
-`git rev-parse HEAD` and check `vcs.modified=false`. Repeat the same build with
-the same toolchain and environment to check byte-for-byte reproducibility.
-Keep an existing release installation available for rollback, and verify which
-binary your shell selects. This is the standard CLI-only source build; it does
-not manufacture a release runtime pack.
+Use the Go toolchain declared in `go.mod`. Record the Go version, target OS and
+architecture, build command, source revision and binary SHA-256. This is a
+source build, not an upstream release or a generated release runtime pack.
 
-## Inspect and reuse existing templates
+Before replacing the working CLI, use the candidate to acquire one disposable
+clone from each required macOS and Windows base. Verify source transfer, the
+configured guest account, command execution, retrieval of a bounded artifact,
+and confirmed cleanup. Run the project's required app checks separately.
+Preserve the prior working binary for rollback.
 
-Before creating a VM, run `crabbox config path`, `crabbox config show`, and
-`crabbox doctor`. Inspect configured template aliases and the source VM's state.
-Use an existing suitable template before preparing another. Follow the
-[Parallels provider rules](docs/providers/parallels.md) for guest accounts,
-Tools readiness, clone modes, and snapshots.
+## Reuse existing bases
+
+Inspect `crabbox config path`, `crabbox config show`, and `crabbox doctor` before
+acquisition. Choose an existing suitable template before preparing another VM.
+Follow the [Parallels provider guide](docs/providers/parallels.md) for guest
+accounts, Tools readiness, clone modes, and snapshots.
 
 Keep clone sources stopped. A linked clone needs its selected power-off
 snapshot. A full clone uses the current stopped source and cannot select a
@@ -55,40 +63,33 @@ snapshot. Set the actual guest account and a writable guest work root. Do not
 assume the host account exists in the guest. Preserve source VMs and snapshots
 when cleaning up disposable leases.
 
-Set the guest account in `parallels.user` or the selected template's `user`.
-Generic `ssh.user` does not currently override the Parallels default reliably.
+Set `parallels.user` or the selected template's `user` explicitly for a known
+base. The upstream implementation also respects explicit generic `ssh.user`
+when no provider-specific user overrides it.
 
 A reusable source must be an operator-managed VM, separate from disposable
 Crabbox leases. `keep=true` suppresses automatic release after a run; it does
-not protect an expired lease from `crabbox machine cleanup`. Check the cleanup
-dry run before treating any retained machine as a permanent base.
+not protect an expired lease from `crabbox machine cleanup`. Review the cleanup
+dry run before treating a retained machine as a permanent base.
 
-Run from the project checkout you intend to sync. Review its configuration and
-`crabbox sync-plan` before sending files. Exclude credentials, private environment
-files, signing keys, and unrelated data. Give concurrent actors separate leases,
-checkouts, test fixtures, and artifact directories.
+Run from the project checkout intended for synchronization. Review its config
+and `crabbox sync-plan`; exclude credentials, private environment files, signing
+keys and unrelated data. Give concurrent actors separate leases, checkouts,
+fixtures and artifact directories. Warm once and reuse the lease ID for repeated
+checks. Stop only owned disposable leases, retrieve evidence first, and confirm
+cleanup rather than treating a warning as successful removal.
 
-For repeated checks, warm a lease once and reuse its ID with `crabbox run --id`.
-Use `--keep` when subsequent commands need that lease. Fresh one-shot runs are
-useful when checking provisioning or when a test requires a clean machine.
-Stop only your owned disposable lease with `crabbox stop`. Verify the VM and its
-per-lease keys were removed. A cleanup warning alone does not prove removal.
-
-Retrieve required artifacts before stopping the lease. Record the source
-revision, command, exit status, and cleanup result with each test's evidence.
-Use the official skill's sync and artifact commands for the details.
-
-## Maintain the temporary fork
+## Return to a published upstream release
 
 Keep `main` as the upstream mirror and `codex/parallels-fixes` as the integration
-branch. Leave the upstream PR branches separate. Merge upstream updates into
-the integration branch, resolve merged fixes to their upstream implementations,
-and rerun the affected provider tests and fresh-clone checks. Avoid force-pushing
-the shared branch.
+branch. Merge upstream updates without rewriting shared history; use the
+upstream implementation when a local fix has landed there. Keep this README
+introduction as the only current tree difference.
 
-After both fixes merge, validate an upstream build with the same clone checks
-and return to the upstream CLI. Retiring this fork does not require deleting
-local templates or project evidence.
+When a published release contains both fixes, repeat the native clone checks
+with that release. Then update installation guidance and switch the normal CLI
+to it. Retiring the temporary fork installation does not require deleting or
+rebuilding bases, snapshots, user configuration, or historical test evidence.
 
 The remainder of this README is the unchanged upstream guide.
 
