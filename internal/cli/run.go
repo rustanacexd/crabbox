@@ -1070,6 +1070,19 @@ func (a App) runCommandWithBenchmarkRecord(ctx context.Context, args []string, b
 	var lifecycleOwner *workspaceOwner
 	var acquired, releaseResolvedLease, keepFailedLease bool
 	ownerParentCtx := ctx
+	// Hand the exact post-run claim snapshot back to shard. Must not reread disk
+	// at release time — that rediscovers authority and breaks ABA fencing.
+	defer func() {
+		if a.runOutcome == nil {
+			return
+		}
+		claim, exists, set := ServerLeaseClaimSnapshot(server)
+		if !set || !exists {
+			return
+		}
+		cloned := cloneLeaseClaim(claim)
+		a.runOutcome.AuthorizedClaim = &cloned
+	}()
 	// Report recovery after every cleanup defer, including early setup and
 	// fail-closed owner returns, but before the final timing record is written.
 	defer func() {
@@ -1095,7 +1108,11 @@ func (a App) runCommandWithBenchmarkRecord(ctx context.Context, args []string, b
 		case strings.TrimSpace(*stopAfter) != "":
 			reason = "automatic cleanup skipped by --stop-after " + *stopAfter
 		case *keep:
-			reason = "automatic cleanup disabled by --keep"
+			if a.shardOwnsLeaseCleanup {
+				reason = "shard owns lease cleanup"
+			} else {
+				reason = "automatic cleanup disabled by --keep"
+			}
 		case keepFailedLease:
 			reason = "automatic cleanup skipped by --keep-on-failure"
 		case !acquired:
@@ -1220,7 +1237,7 @@ func (a App) runCommandWithBenchmarkRecord(ctx context.Context, args []string, b
 		if ownerQuiescent && readyPoolReturnNeedsHydrationStop(result) {
 			a.writeActionsHydrationStopBestEffort(context.WithoutCancel(ctx), target, borrowedPool.Entry.LeaseID)
 		}
-		returnErr := returnReadyPoolAfterWorkspaceOwner(ctx, &lifecycleOwner, func(returnCtx context.Context) error {
+		returnErr := returnReadyPoolAfterWorkspaceOwner(ctx, leaseID, &lifecycleOwner, func(returnCtx context.Context) error {
 			if runtimeErr := runtimeScope.finalizeLease(returnCtx, leaseID, false, nil); runtimeErr != nil {
 				return runtimeErr
 			}
@@ -2656,7 +2673,10 @@ retrySync:
 		freshActionsSeed := false
 		if !overlayDecision.Enabled && !plainManifestMode && coherence.seedEnabled() {
 			stepStart = time.Now()
-			if out, err := runIdempotentSSHGitOriginAttempt(ctx, target, remoteGitSeed(workdir, coherence), idempotentSSHRetryDelay); err != nil {
+			stopSeedHeartbeat := startGitSeedHeartbeat(a.Stderr, stepStart, gitSeedHeartbeatInterval)
+			out, err := runIdempotentSSHGitOriginAttempt(ctx, target, remoteGitSeed(workdir, coherence), idempotentSSHRetryDelay)
+			stopSeedHeartbeat()
+			if err != nil {
 				if reason, fallback := gitSeedRuntimeFallbackResult(coherence, out, err); fallback {
 					if reason == "exact_commit_unavailable" && autoHydrateActions && !hydratedByActions && supportsLocalActionsHydrateTarget(targetWithConfigDefaults(target, cfg)) {
 						fresh, err := a.seedLocalActionsAncestor(ctx, cfg, repo, target, workdir)
@@ -2667,10 +2687,10 @@ retrySync:
 					}
 					usePlainManifestForOrigin(reason)
 				} else if coherence.Branch == "" || exitCode(err) == gitSeedUnsafeWorkspaceExitCode {
-					reportRemoteGitSeedFailure(a.Stderr, out, err, "aborting before file sync")
+					reportRemoteGitSeedFailure(ctx, a.Stderr, out, err, "aborting before file sync")
 					return recordFailure(Exit(6, "remote git seed failed: %v", err))
 				} else {
-					warnRemoteGitSeedFailure(a.Stderr, out, err)
+					warnRemoteGitSeedFailure(ctx, a.Stderr, out, err)
 				}
 			} else {
 				seedSucceeded = true
@@ -3599,7 +3619,7 @@ afterSync:
 	return nil
 }
 
-func returnReadyPoolAfterWorkspaceOwner(ctx context.Context, owner **workspaceOwner, returnLease func(context.Context) error) error {
+func returnReadyPoolAfterWorkspaceOwner(ctx context.Context, leaseID string, owner **workspaceOwner, returnLease func(context.Context) error) error {
 	if owner != nil && *owner != nil {
 		current := *owner
 		*owner = nil
@@ -3611,6 +3631,11 @@ func returnReadyPoolAfterWorkspaceOwner(ctx context.Context, owner **workspaceOw
 	}
 	returnCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
+	// Revoke access only after the invocation has closed its pinned relay masters.
+	// Otherwise an orderly pool return is reported as an SSH exit-255 failure.
+	if err := closeServeRelayControls(returnCtx, leaseID); err != nil {
+		return fmt.Errorf("close relay before pool return: %w", err)
+	}
 	return returnLease(returnCtx)
 }
 
@@ -5209,6 +5234,9 @@ func (a App) stop(ctx context.Context, args []string) (stopErr error) {
 	if strings.TrimSpace(*id) == "" || fs.NArg() > 1 || (idFlagSet && fs.NArg() > 0) {
 		return Exit(2, "usage: crabbox stop --id <lease-or-server-id>")
 	}
+	if err := refuseControllerRetainedLease(*id); err != nil {
+		return err
+	}
 	if *forceRecovery {
 		if !flagWasSet(fs, "provider") {
 			return Exit(2, "stop --force requires an explicit --provider")
@@ -5667,7 +5695,7 @@ func shouldWriteActionsHydrationStop(leaseID string, target SSHTarget) bool {
 	return leaseID != "" && target.Host != ""
 }
 
-const actionsHydrationStopSettleDelay = 20 * time.Second
+var actionsHydrationStopSettleDelay = 20 * time.Second
 
 func leaseDisplayID(lease CoordinatorLease) string {
 	if lease.CloudID != "" {
