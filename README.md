@@ -1,18 +1,19 @@
 # Crabbox: upstream mirror and temporary installation guide
 
-This fork follows [upstream main](https://github.com/openclaw/crabbox/tree/main).
-Its only current tree difference is this project-neutral README introduction.
-The Windows staging recovery fix and macOS guest-account fix are now upstream:
+This fork follows [upstream main](https://github.com/openclaw/crabbox/tree/main)
+plus one fix that is not upstream yet:
 
-- [Windows staging recovery, merged](https://github.com/openclaw/crabbox/pull/2957).
-- [macOS guest-account selection, merged](https://github.com/openclaw/crabbox/pull/2958).
+- [Parallels link-local guest address](https://github.com/openclaw/crabbox/pull/2981), open.
+  A Windows guest reports a self-assigned `169.254.x.x` address until DHCP
+  answers. Upstream Crabbox takes it, waits its full 20 minute SSH timeout,
+  and replaces the lease. This fork keeps waiting for the routable address.
 
-As checked on 2026-10-26, the latest published release is
-[v0.79.3](https://github.com/openclaw/crabbox/releases/tag/v0.79.3). It predates
-both fixes. A merge into upstream main does not update installed release binaries.
-Keep a verified fork build until a published release contains both fixes and
-passes the native clone checks below. Do not switch to the older released CLI
-just because both pull requests merged.
+The earlier Windows staging recovery
+([#2957](https://github.com/openclaw/crabbox/pull/2957)) and macOS guest-account
+([#2958](https://github.com/openclaw/crabbox/pull/2958)) fixes shipped in
+[v0.80.0](https://github.com/openclaw/crabbox/releases/tag/v0.80.0).
+Keep a verified fork build until a published release contains #2981 and passes
+the native clone checks below. Then switch to the released CLI.
 
 Read the official [Crabbox agent skill](skills/crabbox/SKILL.md) before using
 Crabbox. This fork preserves it unchanged. Use the standard CLI, providers,
@@ -32,7 +33,7 @@ git clone --branch codex/parallels-fixes --single-branch https://github.com/rust
 cd crabbox
 mkdir -p bin
 crabbox_revision="$(git rev-parse --short=12 HEAD)"
-crabbox_version="0.79.3-fork.$crabbox_revision"
+crabbox_version="0.80.0-fork.$crabbox_revision"
 CGO_ENABLED=1 go build -trimpath \
   -ldflags="-X github.com/openclaw/crabbox/internal/cli.version=$crabbox_version" \
   -o bin/crabbox-candidate ./cmd/crabbox
